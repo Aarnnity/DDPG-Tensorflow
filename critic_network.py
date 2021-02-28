@@ -12,20 +12,22 @@ L2 = 0.0001
 class CriticNetwork:
     """docstring for CriticNetwork"""
 
-    def __init__(self, sess, state_dim, action_dim):
+    def __init__(self, sess, state_dim, action_dim, alextmodel_critic):
         self.time_step = 0
         self.sess = sess
         # create q network
         self.state_input, \
         self.action_input, \
+        self.image_input, \
         self.q_value_output, \
-        self.net = self.create_q_network(state_dim, action_dim)
+        self.net = self.create_q_network(state_dim, action_dim, alextmodel_critic)
 
         # create target q network (the same structure with q network)
         self.target_state_input, \
         self.target_action_input, \
+        self.target_image_input, \
         self.target_q_value_output, \
-        self.target_update = self.create_target_q_network(state_dim, action_dim, self.net)
+        self.target_update = self.create_target_q_network(state_dim, action_dim, self.net, alextmodel_critic)
 
         self.create_training_method()
 
@@ -52,31 +54,38 @@ class CriticNetwork:
 	    '''
         self.action_gradients = tf.gradients(self.q_value_output, self.action_input)
 
-    def create_q_network(self, state_dim, action_dim):
+    def create_q_network(self, state_dim, action_dim, alextmodel_critic):
         # the layer size could be changed
         layer1_size = LAYER1_SIZE
         layer2_size = LAYER2_SIZE
 
         state_input = tf.placeholder("float", [None, state_dim])
         action_input = tf.placeholder("float", [None, action_dim])
+        image_input = tf.placeholder(tf.float32, shape=[None, 64, 64, 3])
+        cnn_output = alextmodel_critic(image_input)
 
         W1 = self.variable([state_dim, layer1_size], state_dim)
         b1 = self.variable([layer1_size], state_dim)
         W2 = self.variable([layer1_size, layer2_size], layer1_size + action_dim)
         W2_action = self.variable([action_dim, layer2_size], layer1_size + action_dim)
         b2 = self.variable([layer2_size], layer1_size + action_dim)
-        W3 = tf.Variable(tf.random_uniform([layer2_size, 1], -3e-3, 3e-3))
+        W3 = tf.Variable(tf.random_uniform([layer2_size + 512, 1], -3e-3, 3e-3))
         b3 = tf.Variable(tf.random_uniform([1], -3e-3, 3e-3))
 
         layer1 = tf.nn.relu(tf.matmul(state_input, W1) + b1)
         layer2 = tf.nn.relu(tf.matmul(layer1, W2) + tf.matmul(action_input, W2_action) + b2)
+        layer2 = tf.concat([layer2, cnn_output], 1)
         q_value_output = tf.identity(tf.matmul(layer2, W3) + b3)
 
-        return state_input, action_input, q_value_output, [W1, b1, W2, W2_action, b2, W3, b3]
+        return state_input, action_input, image_input, q_value_output, [W1, b1, W2, W2_action, b2, W3, b3]
 
-    def create_target_q_network(self, state_dim, action_dim, net):
+    def create_target_q_network(self, state_dim, action_dim, net, alextmodel_critic):
         state_input = tf.placeholder("float", [None, state_dim])
         action_input = tf.placeholder("float", [None, action_dim])
+        image_input = tf.placeholder(tf.float32, shape=[None, 64, 64, 3])
+        cnn_output = alextmodel_critic(image_input)
+        a_params = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='critic')
+        net.extend(a_params)
 
         ema = tf.train.ExponentialMovingAverage(decay=1 - TAU)
         target_update = ema.apply(net)
@@ -84,9 +93,10 @@ class CriticNetwork:
 
         layer1 = tf.nn.relu(tf.matmul(state_input, target_net[0]) + target_net[1])
         layer2 = tf.nn.relu(tf.matmul(layer1, target_net[2]) + tf.matmul(action_input, target_net[3]) + target_net[4])
+        layer2 = tf.concat([layer2, cnn_output], 1)
         q_value_output = tf.identity(tf.matmul(layer2, target_net[5]) + target_net[6])
 
-        return state_input, action_input, q_value_output, target_update
+        return state_input, action_input,image_input, q_value_output, target_update
 
     def update_target(self):
         self.sess.run(self.target_update)

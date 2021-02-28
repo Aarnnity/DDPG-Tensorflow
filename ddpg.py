@@ -15,6 +15,9 @@ import math
 from critic_network import CriticNetwork
 from actor_network import ActorNetwork
 from ReplayBuffer import ReplayBuffer
+import keras
+
+from keras.models import Model
 
 # Hyper Parameters:
 
@@ -23,6 +26,46 @@ REPLAY_START_SIZE = 100
 BATCH_SIZE = 32
 GAMMA = 0.99
 
+
+def  get_AlextNetKeras():
+    inputs = keras.Input(shape=[64, 64, 3])
+
+    # Define the converlutional layer 1
+    conv1 = keras.layers.Conv2D(filters=96, kernel_size=[11, 11], strides=[4, 4], activation=keras.activations.relu,
+                                use_bias=True, padding='valid')(inputs)
+
+    # Define the standardization layer 1
+    stand1 = keras.layers.BatchNormalization(axis=1)(conv1)
+
+
+
+    # Define the converlutional layer 2
+    conv2 = keras.layers.Conv2D(filters=256, kernel_size=[5, 5], strides=[1, 1], activation=keras.activations.relu,
+                                use_bias=True, padding='valid')(stand1)
+
+    # Define the standardization layer 2
+    stand2 = keras.layers.BatchNormalization(axis=1)(conv2)
+
+
+
+    # Define the converlutional layer 5
+    conv5 = keras.layers.Conv2D(filters=256, kernel_size=[3, 3], strides=[1, 1], activation=keras.activations.relu,
+                                use_bias=True, padding='valid')(stand2)
+
+
+    # Define the fully connected layer
+    flatten = keras.layers.Flatten()(conv5)
+
+    fc1 = keras.layers.Dense(2048, activation=keras.activations.relu, use_bias=True)(flatten)
+    drop1 = keras.layers.Dropout(0.5)(fc1)
+
+    fc2 = keras.layers.Dense(2048, activation=keras.activations.relu, use_bias=True)(drop1)
+    drop2 = keras.layers.Dropout(0.5)(fc2)
+
+    fc3 = keras.layers.Dense(512, activation=keras.activations.softmax, use_bias=True)(drop2)
+
+    model = Model(inputs=inputs, outputs=fc3)
+    return model
 
 class DDPG:
     """docstring for DDPG"""
@@ -39,8 +82,15 @@ class DDPG:
         self.time_step = 0
         self.sess = tf.InteractiveSession()
 
-        self.actor_network = ActorNetwork(self.sess, self.state_dim, self.action_dim)
-        self.critic_network = CriticNetwork(self.sess, self.state_dim, self.action_dim)
+
+        with tf.variable_scope("actor"):
+            alextmodel_actor = get_AlextNetKeras()
+        with tf.variable_scope("Critic"):
+            alextmodel_critic = get_AlextNetKeras()
+
+
+        self.actor_network = ActorNetwork(self.sess, self.state_dim, self.action_dim,alextmodel_actor)
+        self.critic_network = CriticNetwork(self.sess, self.state_dim, self.action_dim,alextmodel_critic)
 
         # initialize replay buffer
         self.replay_buffer = ReplayBuffer(REPLAY_BUFFER_SIZE)
@@ -72,7 +122,7 @@ class DDPG:
 
         # Calculate y_batch
 
-        next_action_batch = self.actor_network.target_actions(next_state_batch)
+        next_action_batch = self.actor_network.target_actions(next_state_batch)  # 下一步的计算使用target
         q_value_batch = self.critic_network.target_q(next_state_batch, next_action_batch)
         y_batch = []
         for i in range(len(minibatch)):

@@ -84,12 +84,12 @@ def playGame(train_indicator=is_training):  # 1 means Train, 0 means simply Run
             if (train_indicator):
                 epsilon -= 1.0 / EXPLORE
                 epsilon = max(epsilon, 0.1)
-                a_t = agent.noise_action(s_t, epsilon)
+                a_t = agent.noise_action(s_t, epsilon)  #输入状态s得到动作的Q值
             else:
                 a_t = agent.action(s_t)
 
             # ob, r_t, done, info = env.step(a_t[0],early_stop)
-            ob, r_t, done, info = env.step(a_t, early_stop)
+            ob, r_t, done, info = env.step(a_t, early_stop) #  得到游戏反馈
             s_t1 = np.hstack(
                 (ob.angle, ob.track, ob.trackPos, ob.speedX, ob.speedY, ob.speedZ, ob.wheelSpinVel / 100.0, ob.rpm))
 

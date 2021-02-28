@@ -13,18 +13,19 @@ BATCH_SIZE = 32
 class ActorNetwork:
     """docstring for ActorNetwork"""
 
-    def __init__(self, sess, state_dim, action_dim):
+    def __init__(self, sess, state_dim, action_dim, alextmodel_actor):
         self.sess = sess
         self.state_dim = state_dim
         self.action_dim = action_dim
 
         # create actor network
-        self.state_input, self.action_output, self.net = self.create_network(state_dim, action_dim)
 
+        self.state_input, self.image_input, self.action_output, self.net = self.create_network(state_dim, action_dim,
+                                                                                               alextmodel_actor)
 
         # create target actor network
-        self.target_state_input, self.target_action_output, self.target_update, self.target_net = self.create_target_network(
-            state_dim, action_dim, self.net)
+        self.target_state_input, self.target_image_input,self.target_action_output, self.target_update, self.target_net = self.create_target_network(
+            state_dim, action_dim, self.net, alextmodel_actor)
 
         # define training rules
         self.create_training_method()
@@ -44,11 +45,13 @@ class ActorNetwork:
 	    '''
         self.optimizer = tf.train.AdamOptimizer(LEARNING_RATE).apply_gradients(zip(self.parameters_gradients, self.net))
 
-    def create_network(self, state_dim, action_dim):
+    def create_network(self, state_dim, action_dim, alextmodel_actor):
         layer1_size = LAYER1_SIZE
         layer2_size = LAYER2_SIZE
 
         state_input = tf.placeholder("float", [None, state_dim])
+        image_input = tf.placeholder(tf.float32, shape=[None, 64, 64, 3])
+        cnn_output = alextmodel_actor(image_input)
 
         W1 = self.variable([state_dim, layer1_size], state_dim)
         b1 = self.variable([layer1_size], state_dim)
@@ -57,41 +60,48 @@ class ActorNetwork:
         # W3 = tf.Variable(tf.random_uniform([layer2_size,action_dim],-3e-3,3e-3))
         # b3 = tf.Variable(tf.random_uniform([action_dim],-3e-3,3e-3))
 
-        W_steer = tf.Variable(tf.random_uniform([layer2_size, 1], -1e-4, 1e-4))
+        W_steer = tf.Variable(tf.random_uniform([layer2_size + 512, 1], -1e-4, 1e-4))
         b_steer = tf.Variable(tf.random_uniform([1], -1e-4, 1e-4))
 
-        W_accel = tf.Variable(tf.random_uniform([layer2_size, 1], -1e-4, 1e-4))
+        W_accel = tf.Variable(tf.random_uniform([layer2_size + 512, 1], -1e-4, 1e-4))
         b_accel = tf.Variable(tf.random_uniform([1], -1e-4, 1e-4))
 
-        W_brake = tf.Variable(tf.random_uniform([layer2_size, 1], -1e-4, 1e-4))
+        W_brake = tf.Variable(tf.random_uniform([layer2_size + 512, 1], -1e-4, 1e-4))
         b_brake = tf.Variable(tf.random_uniform([1], -1e-4, 1e-4))
 
         layer1 = tf.nn.relu(tf.matmul(state_input, W1) + b1)
         layer2 = tf.nn.relu(tf.matmul(layer1, W2) + b2)
+        layer2 = tf.concat([layer2, cnn_output], 1)
 
         steer = tf.tanh(tf.matmul(layer2, W_steer) + b_steer)
         accel = tf.sigmoid(tf.matmul(layer2, W_accel) + b_accel)
         brake = tf.sigmoid(tf.matmul(layer2, W_brake) + b_brake)
 
-        #action_output = tf.concat(1, [steer, accel, brake])
-        action_output = tf.concat( [steer, accel, brake],1)
-        return state_input, action_output, [W1, b1, W2, b2, W_steer, b_steer, W_accel, b_accel, W_brake, b_brake]
+        # action_output = tf.concat(1, [steer, accel, brake])
+        action_output = tf.concat([steer, accel, brake], 1)
+        return state_input, image_input, action_output, [W1, b1, W2, b2, W_steer, b_steer, W_accel, b_accel, W_brake,
+                                                         b_brake]
 
-    def create_target_network(self, state_dim, action_dim, net):
+    def create_target_network(self, state_dim, action_dim, net, alextmodel_actor):
         state_input = tf.placeholder("float", [None, state_dim])
+        image_input = tf.placeholder(tf.float32, shape=[None, 64, 64, 3])
+        cnn_output = alextmodel_actor(image_input)
+        a_params = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='actor')
+        net.extend(a_params)
         ema = tf.train.ExponentialMovingAverage(decay=1 - TAU)
         target_update = ema.apply(net)
         target_net = [ema.average(x) for x in net]
 
         layer1 = tf.nn.relu(tf.matmul(state_input, target_net[0]) + target_net[1])
         layer2 = tf.nn.relu(tf.matmul(layer1, target_net[2]) + target_net[3])
-
+        layer2 = tf.concat([layer2, cnn_output], 1)
         steer = tf.tanh(tf.matmul(layer2, target_net[4]) + target_net[5])
         accel = tf.sigmoid(tf.matmul(layer2, target_net[6]) + target_net[7])
         brake = tf.sigmoid(tf.matmul(layer2, target_net[8]) + target_net[9])
 
-        action_output = tf.concat(1, [steer, accel, brake])
-        return state_input, action_output, target_update, target_net
+        # action_output = tf.concat(1, [steer, accel, brake])
+        action_output = tf.concat([steer, accel, brake], 1)
+        return state_input, image_input, action_output, target_update, target_net
 
     def update_target(self):
         self.sess.run(self.target_update)
